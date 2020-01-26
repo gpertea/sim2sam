@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(polyester2SAM)
+project(sim2sam)
 
 set (CMAKE_STATIC_LINKER_FLAGS "-Wl,--as-needed.-lcurl")
 
@@ -24,7 +24,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
 include_directories(src)
 
-add_executable(polyester2SAM
+add_executable(sim2sam
         src/arg_parse.cpp
         src/arg_parse.h
         src/codons.cpp

@@ -201,11 +201,6 @@ public:
     }
 };
 
-enum Opt {GFF     = 'g',
-          SINGLE  = 's',
-          OUTPUT  = 'o',
-          INDEX   = 'i'};
-
 // this function generates alignment header
 void get_header(std::string &header,std::string index_fname,std::string cl){
     header += "@HD\tVN:1.0\tSO:unsorted\n";
@@ -234,45 +229,65 @@ void get_header(std::string &header,std::string index_fname,std::string cl){
     }
     index_stream.close();
     // PG is added using the arguments from the execution of trans2genome during the conversion
-    header += "@PG\tID:polyester2SAM\tPN:polyester_2SAMtVN:0.0\tCL:\"" + cl + "\"";
+    header += "@PG\tID:sim2sam\tPN:sim2sam:0.0\tCL:\"" + cl + "\"";
 }
 
 class Read{
 public:
-    Read():name(""),tid(""),start(0),end(0){}
+    Read():name(""),tid(""),start(0),end(0),strand(-1){}
     ~Read() = default;
-    void parse_read(std::string &read){
+    void parse_read_poly(std::string &read){
         // get read number which is first
         std::size_t prev_delim = 0;
         std::size_t delim = read.find("/");
-        this->name = read.substr(0,delim);
+        this->name = read.substr(0, delim);
 
         // get transcript id
         prev_delim = delim;
-        delim = read.find(";",prev_delim+1);
-        this->tid = read.substr(prev_delim+1,(delim-prev_delim)-1);
+        delim = read.find(";", prev_delim + 1);
+        this->tid = read.substr(prev_delim + 1, (delim - prev_delim) - 1);
 
         // get start position on the transcript
         prev_delim = delim;
-        delim = read.find(":",prev_delim+1);
+        delim = read.find(":", prev_delim + 1);
         prev_delim = delim;
-        delim = read.find("-",prev_delim+1);
-        this->start = std::atoi(read.substr(prev_delim+1,(delim-prev_delim)-1).c_str()) - 1;
+        delim = read.find("-", prev_delim + 1);
+        this->start = std::atoi(read.substr(prev_delim + 1, (delim - prev_delim) - 1).c_str()) - 1;
 
         // get end position on the transcript
         prev_delim = delim;
-        delim = read.find(";",prev_delim+1);
-        this->end = std::atoi(read.substr(prev_delim+1,(delim-prev_delim)-1).c_str());
+        delim = read.find(";", prev_delim + 1);
+        this->end = std::atoi(read.substr(prev_delim + 1, (delim - prev_delim) - 1).c_str());
+    }
+    void parse_read_rsem(std::string &read,std::vector<std::string> &rsemi){
+        std::size_t prev_delim = 0;
+        std::size_t delim = read.find('_');
+        this->name = read.substr(0,delim);
+
+        prev_delim = delim;
+        delim = read.find('_',prev_delim+1);
+        this->strand = std::atoi(read.substr(prev_delim+1,(delim-prev_delim)-1).c_str());
+
+        prev_delim = delim;
+        delim = read.find('_',prev_delim+1);
+        int tmp_id = std::atoi(read.substr(prev_delim+1,(delim-prev_delim)-1).c_str());
+        this->tid = rsemi[tmp_id-1];
+
+        prev_delim = delim;
+        prev_delim = delim;
+        delim = read.find('_',prev_delim+1);
+        this->start = std::atoi(read.substr(prev_delim+1,(delim-prev_delim)-1).c_str());
     }
     void clear(){
         name = "";
         tid = "";
         start = 0;
         end = 0;
+        strand = -1;
     }
 
     std::string name,tid;
-    int start,end;
+    int start,end,type,strand;
 };
 
 bool get_read_start(GList<GffExon>& exon_list,int tstart,int &gstart,int &exon_idx){
@@ -376,15 +391,15 @@ int get_cigar(int exon_i,GSeg *next_exon,GList<GffExon>& exon_list,std::string &
     }
 }
 
-void process_read(Position &cur_pos,std::string &cigars,GffObj *p_gffObj,int tstart,int read_len){
+void process_read(Position &cur_pos,std::string &cigars,GffObj *p_gffObj,int tstart,int read_len,char actual_strand){
     GList<GffExon>& exon_list = p_gffObj->exons; // get exons
 
     GSeg *next_exon=nullptr;
-    int exon_i = (p_gffObj->strand == '+') ? 0 : exon_list.Count()-1;
+    int exon_i = (actual_strand == '+') ? 0 : exon_list.Count()-1;
     int32_t gstart=0;
 
     // first find the genomic read start
-    if(p_gffObj->strand == '-'){
+    if(actual_strand == '-'){
         // compute total transcript length
         int tlen = 0;
         for(int i=0;i<p_gffObj->exons.Count();i++){
@@ -394,13 +409,13 @@ void process_read(Position &cur_pos,std::string &cigars,GffObj *p_gffObj,int tst
     }
     bool ret_val = get_read_start(exon_list,tstart,gstart,exon_i);
     if(!ret_val){
-        std::cerr<<"@ERROR::Can not get the genomic read start"<<std::endl;
+        std::cerr<<"@ERROR::Can not get genomic read start"<<std::endl;
         exit(1);
     }
 
     cur_pos.set_chr(std::string(p_gffObj->getRefName()));
     cur_pos.set_start(gstart);
-    cur_pos.set_strand(p_gffObj->strand);
+    cur_pos.set_strand(actual_strand);
     cur_pos.add_transID(std::string(p_gffObj->getID()));
 
     // secondly build a new cigar string
@@ -409,26 +424,42 @@ void process_read(Position &cur_pos,std::string &cigars,GffObj *p_gffObj,int tst
         std::cerr << "@ERROR::Can not create a new cigar string for the single read from process_read" << std::endl;
         exit(1);
     }
-
-//    std::cerr<<"gstart: "<<cur_pos.chr<<"\t"<<cur_pos.strand<<"\t"<<cur_pos.transIDs.back()<<"\t"<<cur_pos.start<<"\t"<<cigars<<"\t len: "<<read_len<<std::endl;
 }
 
+enum Opt {GFF = 'g',
+    SINGLE    = 's',
+    OUTPUT    = 'o',
+    INDEX     = 'i',
+    RSEM_MAP  = 'r',
+    TYPE      = 't'
+};
+
+
 int main(int argc, char** argv) {
-    ArgParse args("polyester2SAM");
+    ArgParse args("sim2sam");
     args.add_string(Opt::GFF,"gff","","annotation from which reads are simulated",true);
     args.add_string(Opt::SINGLE,"single","","single-end reads",true);
     args.add_string(Opt::OUTPUT,"output","","output SAM alignment",true);
     args.add_string(Opt::INDEX,"index","","Fasta index of the genome from which reads where simulated",true);
+    args.add_string(Opt::RSEM_MAP,"rsemi","","Base name of the RSEM-prepared reference. Required if the RSEM mode is enabled",false);
+    args.add_string(Opt::TYPE,"type","","Type of the simulator used. Options are rsem or polyester",true);
 
     if(argc <= 1 || strcmp(argv[1],"--help")==0){
         std::cerr<<args.get_help()<<std::endl;
         exit(1);
     }
 
+    if(args.get_string(Opt::TYPE)=="rsem"){
+        if(!args.is_set(Opt::RSEM_MAP)){
+            std::cerr<<"To parse RSEM simulation --rsemi must be specified"<<std::endl;
+            exit(1);
+        }
+    }
+
     args.parse_args(argc,argv);
 
     // first create the execution string
-    std::string cl="polyester2SAM ";
+    std::string cl="sim2sam ";
     for (int i=0;i<argc;i++){
         if(i==0){
             cl+=argv[i];
@@ -471,6 +502,40 @@ int main(int argc, char** argv) {
     }
     std::cerr<<"number of transcripts in the index is: "<<idm.size()<<std::endl;
 
+    // if type is RSEM then need to preload the index
+    std::vector<std::string> rsemi;
+    if(args.get_string(Opt::TYPE)=="rsem"){
+        std::vector<int> tid_tmps;
+
+        std::ifstream rsem_idx_fp(args.get_string(Opt::RSEM_MAP));
+        std::string line;
+        std::getline(rsem_idx_fp,line); // skip header
+        int line_no = 0;
+        while (std::getline(rsem_idx_fp, line)){
+            std::istringstream iss(line);
+            std::string tid;
+            std::getline( iss >> std::skipws,tid,'\t');
+            line_no++;
+            rsemi.push_back(tid);
+        }
+        rsem_idx_fp.close();
+    }
+
+    enum TP {RSEM = 0,
+             POLY = 1
+    };
+    int type;
+    if(args.get_string(Opt::TYPE)=="rsem"){
+        type = TP::RSEM;
+    }
+    else if(args.get_string(Opt::TYPE)=="polyester"){
+        type = TP::POLY;
+    }
+    else{
+        std::cerr<<"unknown type specified"<<std::endl;
+        exit(1);
+    }
+
     // now need to iterate over the reads and write out SAM records
     // TODO: need same implementation for paired reads
     FastaReader fastaReader(args.get_string(Opt::SINGLE));
@@ -480,14 +545,18 @@ int main(int argc, char** argv) {
     char strand;
     int count = 0;
     while (fastaReader.good()) {
-//        count+=1;
-//        if(count==5){
-//            break;
-//        }
         fastaReader.next(read_str);
-//        std::cerr<<read_str.id_<<std::endl;
+        if(type==TP::RSEM){
+            read.parse_read_rsem(read_str.id_,rsemi);
+        }
+        else if(type==TP::POLY){
+            read.parse_read_poly(read_str.id_);
+        }
+        else{
+            std::cerr<<"unsupported type"<<std::endl;
+            exit(-1);
+        }
 
-        read.parse_read(read_str.id_);
         // get transcript from gffReader
         idm_it.first = idm.find(read.tid); // get index within the gfflst
         if(idm_it.first == idm.end()){
@@ -496,21 +565,29 @@ int main(int argc, char** argv) {
         }
         p_gffObj = gffReader.gflst.Get(idm_it.first->second); // get the actual transcript object
         strand = p_gffObj->strand;
-//        if(strand == '+'){
-//            continue;
-//        }
-//        else{
-//            count+=1;
-//            if(count==5){
-//                break;
-//            }
-//        }
-
+        if(type==TP::RSEM){ // strand is also set within the read and neads to be taken into account
+            if(strand=='+' && read.strand){
+                strand = '-';
+            }
+            else if(strand=='+' && !read.strand){
+                strand = '+';
+            }
+            else if(strand=='-' && read.strand){
+                strand = '+';
+            }
+            else if(strand=='-' && !read.strand){
+                strand = '-';
+            }
+            else{
+                std::cerr<<"unknown strand"<<std::endl;
+                exit(-1);
+            }
+        }
         // not to get the genomic position and the cigar string
         Position cur_pos;
         std::string cigars = "";
         read_len = read_str.seq_.size();
-        process_read(cur_pos,cigars,p_gffObj,read.start,read_len);
+        process_read(cur_pos,cigars,p_gffObj,read.start,read_len,strand);
 
         // get flag and reverse sequence
         int flag = 0;
@@ -519,13 +596,9 @@ int main(int argc, char** argv) {
         if(cur_pos.strand == '-'){
             flag = 16;
             reverseComplement(seq,read_str.seq_.size());
-//            std::cout<<read_str.seq_<<std::endl;
-//            std::cout<<seq<<std::endl;
-//            break;
         }
 
         // now to write the record to the file
-//        std::cerr<<p_gffObj->getRefName()<<std::endl;
         out_al_fp << read.name << "\t"
                   << flag << "\t"
                   << std::string(p_gffObj->getRefName()) << "\t"
