@@ -286,6 +286,10 @@ public:
         strand = -1;
     }
 
+    std::string get_strg(){
+        return name+"_"+tid+"_"+std::to_string(start)+"_"+std::to_string(end)+"_"+std::to_string(strand);
+    }
+
     std::string name,tid;
     int start,end,type,strand;
 };
@@ -579,7 +583,7 @@ int main(int argc, char** argv) {
                 strand = '-';
             }
             else{
-                std::cerr<<"unknown strand"<<std::endl;
+                std::cerr<<"unknown strand: "<<read.get_strg()<<"\t"<<strand<<std::endl;
                 exit(-1);
             }
         }
