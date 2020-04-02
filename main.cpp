@@ -579,7 +579,7 @@ int main(int argc, char** argv) {
                 strand = '-';
             }
             else{
-                std::cerr<<"unknown strand"<<std::endl;
+                std::cerr<<"unknown strand: "<<read.tid<<"\t"<<strand<<"\t"<<read.strand<<std::endl;
                 exit(-1);
             }
         }
