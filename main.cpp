@@ -258,7 +258,14 @@ public:
         prev_delim = delim;
         delim = read.find(";", prev_delim + 1);
         this->end = std::atoi(read.substr(prev_delim + 1, (delim - prev_delim) - 1).c_str());
+        this->name+=".";
+        this->name+=this->tid;
+        this->name+=":";
+        this->name+=std::to_string(this->start);
+        this->name+="-";
+        this->name+=std::to_string(this->end);
     }
+    
     void parse_read_rsem(std::string &read,std::vector<std::string> &rsemi){
         std::size_t prev_delim = 0;
         std::size_t delim = read.find('_');
@@ -473,13 +480,21 @@ int main(int argc, char** argv) {
             cl+=argv[i];
         }
     }
-
-    std::ofstream out_al_fp(args.get_string(Opt::OUTPUT));
-
+    std::string fnout(args.get_string(Opt::OUTPUT));
+    std::ostream* out_al_fp;
+    bool outfclose=false;
+    if (fnout=="-" || fnout=="stdout") {
+      out_al_fp = &std::cout;
+    }
+    else {
+      out_al_fp = new std::ofstream(fnout);
+    }
+    
     std::string header = "";
-    get_header(header,args.get_string(Opt::INDEX),cl);
+        
+    get_header(header, args.get_string(Opt::INDEX),cl);
     // write header
-    out_al_fp << header << std::endl;
+    *out_al_fp << header << std::endl;
 
     // load the GFF
     FILE* gff_file = fopen(args.get_string(Opt::GFF).c_str(), "r");
@@ -603,7 +618,7 @@ int main(int argc, char** argv) {
         }
 
         // now to write the record to the file
-        out_al_fp << read.name << "\t"
+        *out_al_fp << read.name << "\t"
                   << flag << "\t"
                   << std::string(p_gffObj->getRefName()) << "\t"
                   << cur_pos.start << "\t"
@@ -629,6 +644,8 @@ int main(int argc, char** argv) {
         read.clear();
     }
 
-    out_al_fp.close();
+    //out_al_fp.close();
+    out_al_fp->flush();
+    if (out_al_fp != & std::cout) delete out_al_fp;
     return 0;
 }
